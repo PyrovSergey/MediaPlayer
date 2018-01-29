@@ -1,8 +1,15 @@
 package com.test.mediaplayer;
 
+import android.Manifest;
+import android.content.ContentResolver;
+import android.content.pm.PackageManager;
+import android.database.Cursor;
 import android.media.MediaPlayer;
+import android.net.Uri;
 import android.os.Bundle;
+import android.os.Environment;
 import android.os.Handler;
+import android.provider.MediaStore;
 import android.support.v7.app.AppCompatActivity;
 import android.view.View;
 import android.widget.ImageButton;
@@ -11,9 +18,15 @@ import android.widget.SeekBar;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import java.io.IOException;
 import java.util.concurrent.TimeUnit;
 
 public class MainActivity extends AppCompatActivity implements View.OnClickListener {
+
+    private static final int PERMISSION_REQUEST_CODE = 1;
+    private final String DATA_SD = String.valueOf(Environment
+            .getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC));
+
     private ImageButton buttonForward, buttonPause, buttonPlay, buttonRewind;
     private TextView tx1, tx2, songTitle;
     private SeekBar seekbar;
@@ -38,7 +51,23 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
         initializationViewComponents();
 
         songTitle.setText("Song.mp3");
-        mediaPlayer = MediaPlayer.create(this, R.raw.song);
+
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M) {
+            if (checkSelfPermission(Manifest.permission.READ_EXTERNAL_STORAGE)
+                    == PackageManager.PERMISSION_DENIED) {
+
+                String[] permissions = {Manifest.permission.READ_EXTERNAL_STORAGE};
+                requestPermissions(permissions, PERMISSION_REQUEST_CODE);
+            }
+        }
+
+        mediaPlayer = new MediaPlayer();
+        try {
+            mediaPlayer.setDataSource(DATA_SD);
+            mediaPlayer.prepare();
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
     }
 
     private Runnable UpdateSongTime = new Runnable() {
@@ -56,36 +85,47 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
     };
 
     public void play() {
+        // пишем в тоаст что "Playing sound"
         Toast.makeText(getApplicationContext(), "Playing sound", Toast.LENGTH_SHORT).show();
+        // стартуем песню
         mediaPlayer.start();
+        // кнопку плей скрываем
         buttonPlay.setVisibility(View.INVISIBLE);
+        // кнопку пауса показываем
         buttonPause.setVisibility(View.VISIBLE);
-
+        // получаем длинну трека и присваеваем ее finalTime
         finalTime = mediaPlayer.getDuration();
+        // получаем текущую позицию воспроизведения и присваиваем ее startTime
         startTime = mediaPlayer.getCurrentPosition();
 
+        // если первый раз проигрывается
         if (oneTimeOnly == 0) {
+            // настраиваем seekbar на основе длины трека
             seekbar.setMax((int) finalTime);
+            // и меняем значение, что уже проигрывался
             oneTimeOnly = 1;
         }
-
+        // тут присваеваем сколько идет трек
         tx2.setText(String.format("%d min, %d sec",
                 TimeUnit.MILLISECONDS.toMinutes((long) finalTime),
                 TimeUnit.MILLISECONDS.toSeconds((long) finalTime) -
                         TimeUnit.MINUTES.toSeconds(TimeUnit.MILLISECONDS.toMinutes((long)
                                 finalTime)))
         );
-
+        // тут присваеваем его длительность
         tx1.setText(String.format("%d min, %d sec",
                 TimeUnit.MILLISECONDS.toMinutes((long) startTime),
                 TimeUnit.MILLISECONDS.toSeconds((long) startTime) -
                         TimeUnit.MINUTES.toSeconds(TimeUnit.MILLISECONDS.toMinutes((long)
                                 startTime)))
         );
-
+        // присваиваем каждые 100 миллисекунд прогресс текущего воспроизведения
         seekbar.setProgress((int) startTime);
+        // задаем шаг
         myHandler.postDelayed(UpdateSongTime, 100);
+        // кнопку пауза делаем активной
         buttonPause.setEnabled(true);
+        // кнопку плей делаем неактивной
         buttonPlay.setEnabled(false);
     }
 
@@ -126,6 +166,7 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
     public void onClick(View view) {
         switch (view.getId()) {
             case R.id.button_play:
+                mediaPlayer.start();
                 play();
                 break;
             case R.id.button_pause:
@@ -156,6 +197,43 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
         buttonPause.setOnClickListener(this);
         buttonPlay.setOnClickListener(this);
         buttonRewind.setOnClickListener(this);
+    }
+
+    public void searchMedia() {
+        // получаем собственно сам контент провайдер
+        ContentResolver contentResolver = getContentResolver();
+        // получаем uri где хранятся аудио треки ( в нашем случае папка Music) <- круто если и правда работает
+        Uri uri = android.provider.MediaStore.Audio.Media.EXTERNAL_CONTENT_URI;
+        // передаем в объект курсор путь к этой "папке" (репозиторию), чтобы он принял в себя всю таблицу, без указания защиты,
+        // выбора секции, массива(?) и сортировки)
+        Cursor cursor = contentResolver.query(uri, null, null, null, null);
+        if (cursor == null) {
+            // если вернулся пустой курсор - перехватываем ошибку или выводим сообщение
+            // если нет
+        } else if (!cursor.moveToFirst()) {
+            // если перенос курсора не срабатывает на первую строчку первого столбца
+            // no media on the device
+        } else { // иначе
+            // вытаскиваем из курсора номера столбца названия печни
+            int titleColumn = cursor
+                    .getColumnIndex(android.provider.MediaStore.Audio.Media.TITLE);
+            // вытаскиваем из курсора номера столбца названия печни
+            int idColumn = cursor
+                    // ID таблицы (но он вроде на фиг не нужен)
+                    .getColumnIndex(android.provider.MediaStore.Audio.Media._ID);
+            // вытаскиваем из курсора номера столбца с именем автора
+            int autor = cursor.getColumnIndex(MediaStore.Audio.Media.ARTIST);
+            do {
+                // а вот тут уже вытаскиваем инфу
+                // тут по номеру вытаскиваем ID
+                long thisId = cursor.getLong(idColumn);
+                // тут название название
+                String thisTitle = cursor.getString(titleColumn);
+                // ...process entry...
+                // по любому можно еще что-то вытащить
+                // пока курсор двигается в начало следующей строки
+            } while (cursor.moveToNext());
+        }
     }
 }
 
